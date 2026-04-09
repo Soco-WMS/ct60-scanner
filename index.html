@@ -85,6 +85,14 @@
   .scan-bc { flex: 1; font-size: 22px; font-weight: bold; font-family: monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .scan-loc { font-size: 16px; color: #4caf50; white-space: nowrap; max-width: 80px; overflow: hidden; text-overflow: ellipsis; }
 
+  .scan-qty {
+    font-size: 26px; font-weight: bold; color: #fff;
+    background: #333; border: 2px solid #555; border-radius: 8px;
+    width: 64px; text-align: center; padding: 6px 4px;
+    flex-shrink: 0; cursor: pointer;
+  }
+  .scan-qty:focus { border-color: #4a9eff; outline: none; background: #1a1a2a; }
+
   .del-btn {
     background: #3a1a1a; color: #f44336; border: 1px solid #5a2a2a;
     border-radius: 8px; width: 50px; height: 50px; font-size: 26px;
@@ -190,6 +198,7 @@
 <script>
 // ── Config ─────────────────────────────────────────────
 var GAS_URL = 'https://script.google.com/macros/s/AKfycbxfpBwGLgOvZ0PovNCXW2JJuaE5bcdluZkFbrgngrFv2GmlDb3fSDOWWfJ-9gyovt0qqg/exec';
+var STORAGE_KEY = 'ct60_session';
 
 var scans          = [];
 var activeLocation = '';
@@ -207,6 +216,36 @@ if ('serviceWorker' in navigator) {
       console.warn('SW registration failed:', e);
     });
   });
+}
+
+// ── localStorage persistence ───────────────────────────
+function saveSession() {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({
+      scans:          scans,
+      activeLocation: activeLocation,
+      currentUser:    currentUser,
+      currentMode:    currentMode
+    }));
+  } catch(e) { console.warn('Save failed:', e); }
+}
+
+function loadSession() {
+  try {
+    var raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return false;
+    var s = JSON.parse(raw);
+    if (!s.currentUser || !s.currentMode) return false;
+    scans          = s.scans          || [];
+    activeLocation = s.activeLocation || '';
+    currentUser    = s.currentUser    || '';
+    currentMode    = s.currentMode    || '';
+    return true;
+  } catch(e) { return false; }
+}
+
+function clearSession() {
+  try { localStorage.removeItem(STORAGE_KEY); } catch(e) {}
 }
 
 // ── Connectivity ───────────────────────────────────────
@@ -303,6 +342,24 @@ document.addEventListener('DOMContentLoaded', function() {
 // ── Init ───────────────────────────────────────────────
 window.onload = function() {
   updateConnBadge();
+
+  // Resume interrupted session if one exists
+  if (loadSession()) {
+    document.getElementById('session-label').textContent = currentUser + ' — ' + currentMode;
+    document.getElementById('lock-screen').style.display = 'none';
+    document.getElementById('main-screen').style.display = 'block';
+    if (activeLocation) {
+      document.getElementById('loc-name').textContent = activeLocation;
+      document.getElementById('loc-banner').classList.add('visible');
+    }
+    updateConnBadge();
+    startHeartbeat();
+    startPolling();
+    setTimeout(focusBarcode, 400);
+    renderList();
+    return;
+  }
+
   setTimeout(function() { document.getElementById('lock-user').focus(); }, 300);
 };
 
@@ -321,6 +378,7 @@ function startSession() {
 
   if (!isOnline()) {
     currentUser = user; currentMode = mode;
+    saveSession();
     launchMainScreen(); return;
   }
 
@@ -330,14 +388,15 @@ function startSession() {
     function(res) {
       if (res.success) {
         currentUser = user; currentMode = mode;
+        saveSession();
         launchMainScreen();
       } else {
         showLockStatus(res.message, 'red');
       }
     },
     function() {
-      // Network error — start offline
       currentUser = user; currentMode = mode;
+      saveSession();
       launchMainScreen();
     }
   );
@@ -368,11 +427,13 @@ function endSession() {
   stopHeartbeat(); stopPolling();
   if (isOnline()) gasCall({ action: 'releaseScannerLock' }, function(){}, function(){});
   scans = []; activeLocation = ''; currentUser = ''; currentMode = '';
+  clearSession();
   document.getElementById('main-screen').style.display = 'none';
   document.getElementById('lock-screen').style.display = 'block';
   document.getElementById('lock-user').value = '';
   document.getElementById('lock-mode').value = '';
   document.getElementById('lock-status').textContent = '';
+  document.getElementById('loc-banner').classList.remove('visible');
   updateConnBadge();
   renderList();
 }
@@ -421,6 +482,7 @@ function setActiveLocation(name) {
   document.getElementById('loc-name').textContent = name;
   document.getElementById('loc-banner').classList.add('visible');
   showStatus('Location: ' + name, 'ok');
+  saveSession();
 }
 
 function addScan(barcode) {
@@ -435,6 +497,7 @@ function addScan(barcode) {
     scans.push({ barcode: barcode, qty: 1, location: activeLocation, ts: new Date().toISOString() });
     showStatus('Added: ' + barcode, 'ok');
   }
+  saveSession();
   renderList();
 }
 
@@ -464,22 +527,38 @@ function renderList() {
     var loc = s.location ? (s.location.length > 10 ? s.location.slice(0,8)+'…' : s.location) : '';
     html +=
       '<div class="scan-item">' +
-        '<div class="scan-bc">' + esc(bc) + '</div>' +
-        (loc ? '<div class="scan-loc">' + esc(loc) + '</div>' : '') +
+        '<div class="scan-bc">' + esc(bc) + (loc ? '<br><span style="font-size:15px;color:#4caf50;font-weight:normal;">'+esc(loc)+'</span>' : '') + '</div>' +
+        '<input class="scan-qty" type="number" min="1" value="' + s.qty + '" ' +
+          'onchange="updateQty(' + realIdx + ', this.value)" ' +
+          'onfocus="this.select()" inputmode="numeric">' +
         '<button class="del-btn" onclick="deleteScan('+realIdx+')">✕</button>' +
       '</div>';
   });
   container.innerHTML = html;
 }
 
-function deleteScan(idx) { scans.splice(idx, 1); renderList(); }
+function updateQty(idx, val) {
+  var n = parseInt(val, 10);
+  if (isNaN(n) || n < 1) n = 1;
+  scans[idx].qty = n;
+  saveSession();
+  renderList();
+}
+
+function deleteScan(idx) {
+  scans.splice(idx, 1);
+  saveSession();
+  renderList();
+}
 
 function clearScans() {
   if (!scans.length || confirm('Clear all scans?')) {
     scans = []; activeLocation = '';
     document.getElementById('loc-banner').classList.remove('visible');
     document.getElementById('barcode-input').value = '';
-    lastVal = ''; renderList();
+    lastVal = '';
+    clearSession();
+    renderList();
     setTimeout(focusBarcode, 100);
   }
 }
@@ -501,6 +580,7 @@ function submitScans() {
       if (res && res.success) {
         showStatus(res.message, 'ok');
         scans = [];
+        clearSession();
         document.getElementById('barcode-input').value = '';
         lastVal = ''; renderList();
         setTimeout(focusBarcode, 200);
