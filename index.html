@@ -278,15 +278,14 @@ window.addEventListener('offline', updateConnBadge);
 
 // ── GAS fetch wrapper ──────────────────────────────────
 function gasCall(params, onSuccess, onFailure) {
-  var url = GAS_URL + '?action=' + encodeURIComponent(params.action);
-  fetch(url, {
-    method:  'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body:    JSON.stringify(params)
-  })
-  .then(function(r) { return r.json(); })
-  .then(onSuccess)
-  .catch(onFailure || function(e) { console.warn('GAS call failed:', e); });
+  var url = GAS_URL
+    + '?action=' + encodeURIComponent(params.action)
+    + '&payload=' + encodeURIComponent(JSON.stringify(params));
+
+  fetch(url, { method: 'GET', redirect: 'follow' })
+    .then(function(r) { return r.json(); })
+    .then(onSuccess)
+    .catch(onFailure || function(e) { console.warn('GAS call failed:', e); });
 }
 
 // ── Strip CR/LF ────────────────────────────────────────
