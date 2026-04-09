@@ -88,7 +88,6 @@
   .scan-item:last-child { border-bottom: none; }
 
   .scan-bc { flex: 1; font-size: 22px; font-weight: bold; font-family: monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .scan-loc { font-size: 16px; color: #4caf50; white-space: nowrap; max-width: 80px; overflow: hidden; text-overflow: ellipsis; }
 
   .scan-qty {
     font-size: 26px; font-weight: bold; color: #fff;
@@ -282,8 +281,15 @@ function gasCall(params, onSuccess, onFailure) {
     + '?action=' + encodeURIComponent(params.action)
     + '&payload=' + encodeURIComponent(JSON.stringify(params));
 
-  fetch(url, { method: 'GET', redirect: 'follow' })
-    .then(function(r) { return r.json(); })
+  fetch(url, { method: 'GET', redirect: 'follow', mode: 'cors' })
+    .then(function(r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.text();
+    })
+    .then(function(text) {
+      var clean = text.replace(/^\)\]\}'/, '').trim();
+      return JSON.parse(clean);
+    })
     .then(onSuccess)
     .catch(onFailure || function(e) { console.warn('GAS call failed:', e); });
 }
@@ -347,8 +353,7 @@ document.addEventListener('DOMContentLoaded', function() {
 window.onload = function() {
   updateConnBadge();
 
-  // Resume interrupted session if one exists
-  if (loadSession()) {
+  if (loadSession() && scans.length > 0) {
     document.getElementById('session-label').textContent = currentUser + ' — ' + currentMode;
     document.getElementById('lock-screen').style.display = 'none';
     document.getElementById('main-screen').style.display = 'block';
