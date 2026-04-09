@@ -1,0 +1,15 @@
+{
+  "name": "CT60 Scanner",
+  "short_name": "CT60",
+  "start_url": "/ct60-scanner/",
+  "display": "standalone",
+  "background_color": "#1a1a1a",
+  "theme_color": "#1a1a1a",
+  "icons": [
+    {
+      "src": "https://via.placeholder.com/192x192/1a1a1a/4a9eff?text=CT60",
+      "sizes": "192x192",
+      "type": "image/png"
+    }
+  ]
+}
