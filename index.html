@@ -275,23 +275,40 @@ function updateConnBadge() {
 window.addEventListener('online',  updateConnBadge);
 window.addEventListener('offline', updateConnBadge);
 
-// ── GAS fetch wrapper ──────────────────────────────────
-function gasCall(params, onSuccess, onFailure) {
-  var url = GAS_URL
-    + '?action=' + encodeURIComponent(params.action)
-    + '&payload=' + encodeURIComponent(JSON.stringify(params));
+// ── GAS fetch wrapper (JSONP — bypasses CORS) ─────────
+var _gasCallbacks = {};
+var _gasCallId = 0;
 
-  fetch(url, { method: 'GET', redirect: 'follow', mode: 'cors' })
-    .then(function(r) {
-      if (!r.ok) throw new Error('HTTP ' + r.status);
-      return r.text();
-    })
-    .then(function(text) {
-      var clean = text.replace(/^\)\]\}'/, '').trim();
-      return JSON.parse(clean);
-    })
-    .then(onSuccess)
-    .catch(onFailure || function(e) { console.warn('GAS call failed:', e); });
+function gasCall(params, onSuccess, onFailure) {
+  var cbName = '_gasCb' + (++_gasCallId);
+  var timeout = setTimeout(function() {
+    delete window[cbName];
+    delete _gasCallbacks[cbName];
+    if (onFailure) onFailure(new Error('Request timed out'));
+  }, 15000);
+
+  window[cbName] = function(data) {
+    clearTimeout(timeout);
+    delete window[cbName];
+    try { onSuccess(data); } catch(e) { console.warn('GAS callback error:', e); }
+  };
+
+  var url = GAS_URL
+    + '?callback=' + cbName
+    + '&action='   + encodeURIComponent(params.action)
+    + '&payload='  + encodeURIComponent(JSON.stringify(params));
+
+  var script = document.createElement('script');
+  script.src = url;
+  script.onerror = function() {
+    clearTimeout(timeout);
+    delete window[cbName];
+    if (onFailure) onFailure(new Error('Script load failed'));
+  };
+  document.head.appendChild(script);
+  setTimeout(function() {
+    if (script.parentNode) script.parentNode.removeChild(script);
+  }, 16000);
 }
 
 // ── Strip CR/LF ────────────────────────────────────────
